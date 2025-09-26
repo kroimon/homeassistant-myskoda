@@ -23,8 +23,8 @@ from myskoda.models.user import User
 from .const import (
     API_COOLDOWN_IN_SECONDS,
     CONF_POLL_INTERVAL,
+    CONF_POLL_INTERVAL_DEFAULT,
     COORDINATORS,
-    DEFAULT_FETCH_INTERVAL_IN_MINUTES,
     DOMAIN,
     MAX_STORED_OPERATIONS,
     MAX_STORED_SERVICE_EVENTS,
@@ -101,7 +101,7 @@ class MySkodaDataUpdateCoordinator(DataUpdateCoordinator[State]):
             name=DOMAIN,
             update_interval=timedelta(
                 minutes=entry.options.get(
-                    CONF_POLL_INTERVAL, DEFAULT_FETCH_INTERVAL_IN_MINUTES
+                    CONF_POLL_INTERVAL, CONF_POLL_INTERVAL_DEFAULT
                 )
             ),
             always_update=False,

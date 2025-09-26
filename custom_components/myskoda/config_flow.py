@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any
 
 import voluptuous as vol
@@ -16,12 +17,21 @@ from homeassistant.config_entries import (
 )
 from homeassistant.core import callback, HomeAssistant
 from homeassistant.exceptions import HomeAssistantError, ConfigEntryNotReady
+from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.schema_config_entry_flow import (
     SchemaCommonFlowHandler,
     SchemaFlowError,
     SchemaFlowFormStep,
     SchemaOptionsFlowHandler,
+)
+from homeassistant.helpers.selector import (
+    NumberSelector,
+    NumberSelectorConfig,
+    NumberSelectorMode,
+    TextSelector,
+    TextSelectorConfig,
+    TextSelectorType,
 )
 from homeassistant.util.ssl import get_default_context
 from myskoda import MySkoda
@@ -37,9 +47,11 @@ from .const import (
     DOMAIN,
     CONF_PASSWORD,
     CONF_POLL_INTERVAL,
+    CONF_POLL_INTERVAL_DEFAULT,
     CONF_POLL_INTERVAL_MIN,
     CONF_POLL_INTERVAL_MAX,
     CONF_SPIN,
+    CONF_SPIN_REGEX,
     CONF_TRACING,
     CONF_USERNAME,
     CONF_READONLY,
@@ -61,20 +73,11 @@ async def validate_options_input(
 
     if CONF_SPIN in user_input:
         s_pin: str = user_input[CONF_SPIN]
-        if not s_pin.isdigit():
+        s_pin_regex = re.compile(CONF_SPIN_REGEX)
+        if not s_pin_regex.match(s_pin_regex):
             raise SchemaFlowError("invalid_spin_format")
 
     return user_input
-
-
-async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> None:
-    """Check that the inputs are valid."""
-    hub = MySkoda(
-        async_get_clientsession(hass), get_default_context(), mqtt_enabled=False
-    )
-
-    await hub.connect(data[CONF_USERNAME], data[CONF_PASSWORD])
-    await hub.disconnect()
 
 
 STEP_USER_DATA_SCHEMA = vol.Schema(
@@ -85,10 +88,21 @@ STEP_USER_DATA_SCHEMA = vol.Schema(
 )
 OPTIONS_SCHEMA = vol.Schema(
     {
-        vol.Required(CONF_TRACING, default=False): bool,
-        vol.Optional(CONF_POLL_INTERVAL): int,
+        vol.Optional(CONF_TRACING, default=False): bool,
         vol.Optional(CONF_READONLY, default=False): bool,
-        vol.Optional(CONF_SPIN): str,
+        vol.Optional(
+            CONF_POLL_INTERVAL, default=CONF_POLL_INTERVAL_DEFAULT
+        ): NumberSelector(
+            NumberSelectorConfig(
+                min=CONF_POLL_INTERVAL_MIN,
+                max=CONF_POLL_INTERVAL_MAX,
+                mode=NumberSelectorMode.BOX,
+                unit_of_measurement="minutes",
+            )
+        ),
+        vol.Optional(CONF_SPIN): TextSelector(
+            TextSelectorConfig(type=TextSelectorType.PASSWORD)
+        ),
     }
 )
 OPTIONS_FLOW = {
@@ -105,6 +119,15 @@ class ConfigFlow(BaseConfigFlow, domain=DOMAIN):
     VERSION = 2
     MINOR_VERSION = 4
 
+    async def _validate_input(data: dict[str, Any]) -> None:
+        """Check that the inputs are valid."""
+        hub = MySkoda(
+            async_get_clientsession(self.hass), get_default_context(), mqtt_enabled=False
+        )
+
+        await hub.connect(data[CONF_USERNAME], data[CONF_PASSWORD])
+        await hub.disconnect()
+
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
@@ -117,11 +140,10 @@ class ConfigFlow(BaseConfigFlow, domain=DOMAIN):
         errors = {}
 
         try:
-            await validate_input(self.hass, user_input)
-        except (CannotConnect, ClientResponseError):
+            await self._validate_input(self.hass, user_input)
+        except ClientResponseError:
             errors["base"] = "cannot_connect"
         except (
-            InvalidAuth,
             AuthorizationError,
             AuthorizationFailedError,
             NotAuthorizedError,
@@ -133,7 +155,7 @@ class ConfigFlow(BaseConfigFlow, domain=DOMAIN):
             _LOGGER.exception("Unexpected exception")
             errors["base"] = "unknown"
         else:
-            return self.async_create_entry(title=user_input["email"], data=user_input)
+            return self.async_create_entry(title=user_input[CONF_USERNAME], data=user_input)
 
         # Only called if there was an error.
         return self.async_show_form(
@@ -154,8 +176,8 @@ class ConfigFlow(BaseConfigFlow, domain=DOMAIN):
 
         if user_input is not None:
             try:
-                await validate_input(self.hass, user_input)
-            except (CannotConnect, ClientResponseError) as err:
+                await self._validate_input(self.hass, user_input)
+            except ClientResponseError as err:
                 errors["base"] = "cannot_connect"
                 raise ConfigEntryNotReady("Error connecting to MySkoda: %s", err)
             except Exception as err:
@@ -199,11 +221,3 @@ class ConfigFlow(BaseConfigFlow, domain=DOMAIN):
     ) -> OptionsFlow:
         """Create the options flow."""
         return SchemaOptionsFlowHandler(config_entry, OPTIONS_FLOW)
-
-
-class CannotConnect(HomeAssistantError):
-    """Error to indicate we cannot connect."""
-
-
-class InvalidAuth(HomeAssistantError):
-    """Error to indicate there is invalid auth."""
