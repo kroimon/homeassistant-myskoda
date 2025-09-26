@@ -73,8 +73,7 @@ async def validate_options_input(
 
     if CONF_SPIN in user_input:
         s_pin: str = user_input[CONF_SPIN]
-        s_pin_regex = re.compile(CONF_SPIN_REGEX)
-        if not s_pin_regex.match(s_pin_regex):
+        if not re.match(CONF_SPIN_REGEX, s_pin):
             raise SchemaFlowError("invalid_spin_format")
 
     return user_input
